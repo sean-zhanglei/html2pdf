@@ -1,0 +1,13 @@
+# 默认忽略目录
+node_modules/
+.next/
+dist/
+build/
+out/
+coverage/
+
+# 忽略所有Markdown文件
+*.md
+
+# 忽略所有JSON文件
+*.json
