@@ -1,9 +1,4 @@
-@import "tailwindcss/index.css";
-@import "tailwindcss/theme.css";
-@import "tailwindcss/utilities.css";
-
-
-:root {
+@import 'tailwindcss': root {
   --background: #ffffff;
   --foreground: #171717;
 }
