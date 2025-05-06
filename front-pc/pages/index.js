@@ -37,6 +37,7 @@ export default function Home() {
         return;
       }
       const result = await response.json();
+      console.log(result);
       setPdfOutput(result.pdfUrl);
       alert('PDF generated successfully! You can download it below.');
     } catch (error) {

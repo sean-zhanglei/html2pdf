@@ -381,12 +381,13 @@ export default async function handler(req, res) {
     // Get the element dimensions
 
     // 生成PDF并保存到本地
-    const pdfDir = path.join(process.cwd(), 'public', 'pdfs');
+    const pdfDir = path.join(process.cwd(), 'temp');
     if (!fs.existsSync(pdfDir)) {
       fs.mkdirSync(pdfDir, { recursive: true });
     }
 
-    const pdfPath = path.join(pdfDir, `${timestamp}.pdf`);
+    const pdfFileName = `${timestamp}.pdf`;
+    const pdfPath = path.join(pdfDir, pdfFileName);
 
     // 获取目标元素
     await page.waitForSelector(selector, { timeout: 3000 });
@@ -406,10 +407,11 @@ export default async function handler(req, res) {
     console.log('元素尺寸:', box);
 
     // 生成PDF并保存到本地
+    const tempDir = path.join(process.cwd(), 'temp', 'images');
+    // 截图并保存到临时目录
+    const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
+
     try {
-      const tempDir = path.join(process.cwd(), 'temp', 'images');
-      // 截图并保存到临时目录
-      const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
       // 确保临时目录存在
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
@@ -439,17 +441,18 @@ export default async function handler(req, res) {
         height: box.height,
       });
       const pdfBytes = await pdfDoc.save();
+      console.log('Write file:', pdfFileName);
       fs.writeFileSync(pdfPath, pdfBytes);
 
       // 清理临时文件
-      // fs.unlinkSync(tempImagePath);
+      fs.unlinkSync(tempImagePath);
     } catch (error) {
       // 错误处理
       console.error('PDF生成错误:', error);
       // 确保清理临时文件
-      // if (fs.existsSync(tempImagePath)) {
-      //   fs.unlinkSync(tempImagePath);
-      // }
+      if (fs.existsSync(tempImagePath)) {
+        fs.unlinkSync(tempImagePath);
+      }
       throw error;
     }
 
@@ -463,7 +466,7 @@ export default async function handler(req, res) {
     // 返回下载链接而非文件内容
     res.status(200).json({
       success: true,
-      pdfUrl: `/pdfs/${timestamp}.pdf`,
+      pdfUrl: `/api/download?file=${pdfFileName}`,
       message: 'PDF生成成功，请通过链接下载',
     });
   } catch (error) {
