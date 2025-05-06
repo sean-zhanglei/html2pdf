@@ -1,0 +1,65 @@
+// pages/api/icbc-login.js
+import axios from 'axios';
+import https from 'https';
+
+const apiClient = axios.create({
+  httpsAgent: new https.Agent({
+    rejectUnauthorized: false, // 忽略证书验证（仅限测试）
+    secureOptions: require('constants').SSL_OP_LEGACY_SERVER_CONNECT,
+  }),
+});
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { url, public: publicParams, private: privateParams } = req.body;
+
+  if (!url || !publicParams || !privateParams) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  try {
+    const response = await apiClient.post(
+      url,
+      JSON.stringify({
+        public: publicParams,
+        private: privateParams,
+      }),
+      {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json;charset=UTF-8',
+          Host: 'job.icbc.com.cn',
+          loginway: 1,
+          Origin: 'https://job.icbc.com.cn',
+          Accept: 'application/json',
+          referer: 'https://job.icbc.com.cn/',
+          zoneno: 10,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        },
+      }
+    );
+
+    res.setHeader('Content-Type', 'application/json');
+    const token = response.headers.token;
+    const userId = response.headers.userid;
+    const zoneNo = response.headers.zoneno;
+    let data = response.data || {};
+    data = {
+      ...data,
+      token: token || '',
+      userId: userId || '',
+      zoneNo: zoneNo || ''
+    };
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('Login proxy error:', error.message);
+    return res.status(error.response?.status || 500).json({
+      error: 'Login failed',
+      message: error.message,
+    });
+  }
+}
