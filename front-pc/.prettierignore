@@ -1,6 +1,7 @@
 # 默认忽略目录
 node_modules/
 .next/
+.vscode/
 dist/
 build/
 out/
