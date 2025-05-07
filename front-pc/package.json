@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && next dev",
+    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && next dev -p 3001",
     "build": "set NODE_OPTIONS=--openssl-legacy-provider && next build",
-    "start": "set NODE_OPTIONS=--openssl-legacy-provider && next start",
+    "start": "set NODE_OPTIONS=--openssl-legacy-provider && next start -p 3001",
+    "unix-dev": "export NODE_OPTIONS=--openssl-legacy-provider && next dev -p 3001",
+    "unix-build": "export NODE_OPTIONS=--openssl-legacy-provider && next build",
+    "unix-start": "export NODE_OPTIONS=--openssl-legacy-provider && next start -p 3001",
     "lint": "next lint"
   },
   "dependencies": {
