@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && next dev -p 3001",
+    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && next dev -H 0.0.0.0 -p 3001",
     "build": "set NODE_OPTIONS=--openssl-legacy-provider && next build",
-    "start": "set NODE_OPTIONS=--openssl-legacy-provider && next start -p 3001",
-    "unix-dev": "export NODE_OPTIONS=--openssl-legacy-provider && next dev -p 3001",
+    "start": "set NODE_OPTIONS=--openssl-legacy-provider && next start -H 0.0.0.0 -p 3001",
+    "unix-dev": "export NODE_OPTIONS=--openssl-legacy-provider && next dev -H 0.0.0.0 -p 3001",
     "unix-build": "export NODE_OPTIONS=--openssl-legacy-provider && next build",
-    "unix-start": "export NODE_OPTIONS=--openssl-legacy-provider && next start -p 3001",
+    "unix-start": "export NODE_OPTIONS=--openssl-legacy-provider && next start -H 0.0.0.0 -p 3001",
+    "pm2-start": "pm2 start npm --name 'unix-html2pdf' -- run unix-start",
     "lint": "next lint"
   },
   "dependencies": {
