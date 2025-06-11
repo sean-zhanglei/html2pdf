@@ -1,28 +1,16 @@
 import puppeteer from 'puppeteer';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import sharp from 'sharp';
 import { Jimp } from 'jimp';
 import fs from 'fs';
 import path from 'path';
 import { PDFDocument } from 'pdf-lib';
 
-const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
+const recognize = async (captchaDir, imagePath) => {
   try {
-    // 1. 截图并读取初始图像
-    const element = await page.$(selector);
-    if (!element) throw new Error('Captcha element not found');
-
-    // 生成captchas png 并保存到本地
-    const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
-    if (!fs.existsSync(captchaDir)) {
-      fs.mkdirSync(captchaDir, { recursive: true });
-    }
-
     // 替换原有的路径拼接代码
     const captchaPath = path.join(captchaDir, imagePath);
     const outImagePath = path.join(captchaDir, `out-${imagePath}`);
-
-    await element.screenshot({ path: captchaPath });
 
     // 2. 使用sharp处理图像
     let sharpImg = await sharp(captchaPath).toBuffer();
@@ -44,19 +32,22 @@ const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
       .extract({ top, left, width: croppedWidth, height: croppedHeight })
       .toBuffer();
 
+    // 1. Sharp 预处理：缩放 + 去噪（关键！小图放大让字符更清晰）
+    let sharpImgMax = await sharp(sharpImg)
+      .resize(300, null, { kernel: sharp.kernel.nearest, fit: 'contain' }) // 放大到 300 宽，保持比例
+      .median(3) // 中值滤波去噪（处理点状干扰）
+      .toBuffer();
+
     // 4. 使用Jimp处理图像
-    const image = await Jimp.read(sharpImg);
+    const image = await Jimp.read(sharpImgMax);
     image.scan(0, 0, image.bitmap.width, image.bitmap.height, (x, y, idx) => {
       const r = image.bitmap.data[idx];
       const g = image.bitmap.data[idx + 1];
       const b = image.bitmap.data[idx + 2];
 
-      // 1. 计算亮度和色度
-      const brightness = (r + g + b) / 3;
-      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-
-      // 2. 背景检测（浅灰色特征）
-      const isBackground = brightness > 180 && chroma < 30;
+      // 👉 优化1：动态二值化（用灰度 + 阈值分割，替代原亮度判断）
+      const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+      const isBackground = gray > 180; // 背景偏亮，直接阈值分割
 
       if (isBackground) {
         // 3. 清除背景
@@ -81,16 +72,28 @@ const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
     });
 
     await image.write(outImagePath);
-    sharpImg = await image.getBuffer('image/png');
+    let sharpImgOut = await image.getBuffer('image/png');
 
-    // 5. 使用tesseract识别
+    // 3. Tesseract 识别：针对性配置（关键！适配验证码场景）
     const worker = await createWorker('eng');
+    await worker.reinitialize('eng');
+    // 👉 优化5：PSM 模式设为 "单个字符行" + 字符白名单
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      tessedit_char_whitelist:
+        '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      tessedit_ocr_engine_mode: 1, // LSTM 引擎优先
+      lstm_choice_mode: 2, // 更激进的选择模式，提高识别准确率
+    });
+
     const {
       data: { text },
-    } = await worker.recognize(sharpImg, 'eng');
+    } = await worker.recognize(sharpImgOut);
     await worker.terminate();
+
+    // 后处理：去空格、过滤非预期字符
+    let captchaText = text.replace(/\s+/g, '').trim();
     console.log('识别的验证码:', text);
-    const captchaText = text.replace(/\s+/g, ''); // 去除空格
     console.log('处理后的验证码:', captchaText);
     return captchaText;
   } catch (error) {
@@ -99,7 +102,23 @@ const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
   }
 };
 
-// 边缘检测辅助函数
+const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
+  // 1. 截图并读取初始图像
+  const element = await page.$(selector);
+  if (!element) throw new Error('Captcha element not found');
+
+  // 生成captchas png 并保存到本地
+  const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
+  if (!fs.existsSync(captchaDir)) {
+    fs.mkdirSync(captchaDir, { recursive: true });
+  }
+  const captchaPath = path.join(captchaDir, imagePath);
+  await element.screenshot({ path: captchaPath });
+  let text = await recognize(captchaDir, imagePath);
+  return text;
+};
+
+// 辅助函数：判断是否边缘像素（原逻辑可保留，或替换为形态学操作）
 function isEdgePixel(image, x, y) {
   if (
     x <= 1 ||
@@ -108,14 +127,11 @@ function isEdgePixel(image, x, y) {
     y >= image.bitmap.height - 2
   )
     return false;
-
-  // 简单梯度检测
   const idx = (y * image.bitmap.width + x) * 4;
   const center =
     image.bitmap.data[idx] +
     image.bitmap.data[idx + 1] +
     image.bitmap.data[idx + 2];
-
   const left =
     image.bitmap.data[idx - 4] +
     image.bitmap.data[idx - 3] +
@@ -124,7 +140,6 @@ function isEdgePixel(image, x, y) {
     image.bitmap.data[idx + 4] +
     image.bitmap.data[idx + 5] +
     image.bitmap.data[idx + 6];
-
   return Math.abs(center - left) > 50 || Math.abs(center - right) > 50;
 }
 
@@ -139,7 +154,7 @@ async function clickButton(page, selector, timeout = 2000) {
   }
 }
 
-async function tryLogin(page, timestamp, username, password, maxAttempts = 2) {
+async function tryLogin(page, timestamp, username, password, maxAttempts = 1) {
   let attempts = 0;
 
   const clearInputs = async () => {
@@ -181,11 +196,21 @@ async function tryLogin(page, timestamp, username, password, maxAttempts = 2) {
       // 处理验证码
       await page.waitForSelector('#verifyCode', { timeout: 2000 });
 
-      const captchaText = await recognizeCaptcha(
-        page,
-        '.ant-btn.ant-btn-image_btn',
-        'captcha' + timestamp + '.png'
-      );
+      const element = await page.$('.ant-btn.ant-btn-image_btn');
+      if (!element) throw new Error('Captcha element not found');
+
+      // 生成captchas png 并保存到本地
+      const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
+      if (!fs.existsSync(captchaDir)) {
+        fs.mkdirSync(captchaDir, { recursive: true });
+      }
+
+      const imagePath = `${timestamp}-captcha.png`;
+      // 替换原有的路径拼接代码
+      const captchaPath = path.join(captchaDir, imagePath);
+      await element.screenshot({ path: captchaPath });
+
+      const captchaText = await recognizeCaptcha(captchaDir, imagePath);
 
       // 输入验证码并点击登录
       await page.type('#verifyCode', captchaText, { delay: 100, clear: true });
@@ -211,6 +236,8 @@ async function tryLogin(page, timestamp, username, password, maxAttempts = 2) {
   }
   return false;
 }
+
+export { recognize };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
