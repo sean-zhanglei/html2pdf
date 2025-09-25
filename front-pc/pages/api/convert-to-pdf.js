@@ -258,8 +258,8 @@ export default async function handler(req, res) {
   let browser;
   try {
     browser = await puppeteer.launch({
-      // headless: true,
-      headless: false,
+      headless: true,
+      // headless: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
