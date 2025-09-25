@@ -105,18 +105,7 @@ const recognize = async (captchaDir, imagePath) => {
   }
 };
 
-const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
-  // 1. 截图并读取初始图像
-  const element = await page.$(selector);
-  if (!element) throw new Error('Captcha element not found');
-
-  // 生成captchas png 并保存到本地
-  const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
-  if (!fs.existsSync(captchaDir)) {
-    fs.mkdirSync(captchaDir, { recursive: true });
-  }
-  const captchaPath = path.join(captchaDir, imagePath);
-  await element.screenshot({ path: captchaPath });
+const recognizeCaptcha = async (captchaDir, imagePath = 'captcha.png') => {
   let text = await recognizeQwen3Vl(captchaDir, imagePath);
   return text;
 };
