@@ -5,6 +5,9 @@ import { Jimp } from 'jimp';
 import fs from 'fs';
 import path from 'path';
 import { PDFDocument } from 'pdf-lib';
+import axios from 'axios';
+import FormData from 'form-data';
+import qwen3vlConfig from '../../config/qwen3vl.js';
 
 const recognize = async (captchaDir, imagePath) => {
   try {
@@ -236,8 +239,6 @@ async function tryLogin(page, timestamp, username, password, maxAttempts = 1) {
   }
   return false;
 }
-
-export { recognize };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -513,3 +514,189 @@ export default async function handler(req, res) {
     }
   }
 }
+
+// 新增recognizeQwen3Vl函数
+const recognizeQwen3Vl = async (captchaDir, imagePath) => {
+  try {
+    // 1. 获取文件上传凭证
+    const uploadTokenResponse = await axios.get(
+      qwen3vlConfig.getApiUrl(qwen3vlConfig.api.uploadsPath),
+      {
+        params: qwen3vlConfig.getUploadParams(),
+        headers: qwen3vlConfig.getAuthHeaders(),
+      }
+    );
+
+    if (!uploadTokenResponse.data || !uploadTokenResponse.data.data) {
+      throw new Error('获取上传凭证失败: 响应数据格式不正确');
+    }
+
+    const { upload_host, oss_access_key_id, policy, signature, upload_dir } =
+      uploadTokenResponse.data.data;
+
+    try {
+      // 2. 上传文件至临时存储空间
+      const captchaPath = path.join(captchaDir, imagePath);
+      const outImagePath = path.join(captchaDir, `out-${imagePath}`);
+
+      // 2. 使用sharp处理图像
+      let sharpImg = await sharp(captchaPath).toBuffer();
+      const { width, height } = await sharp(sharpImg).metadata();
+
+      // 裁剪参数计算
+      const top = 2,
+        bottom = 2,
+        left = 2,
+        right = 2;
+      const croppedWidth = width - left - right;
+      const croppedHeight = height - top - bottom;
+      if (croppedWidth <= 0 || croppedHeight <= 0) {
+        throw new Error('切割后的图像尺寸无效！');
+      }
+
+      // 3. 执行sharp裁剪
+      sharpImg = await sharp(sharpImg)
+        .extract({ top, left, width: croppedWidth, height: croppedHeight })
+        .toBuffer();
+
+      // 4. 使用Jimp处理图像
+      const image = await Jimp.read(sharpImg);
+
+      await image.write(outImagePath);
+
+      // 检查文件是否存在
+      if (!fs.existsSync(outImagePath)) {
+        throw new Error(`验证码图片文件不存在: ${captchaPath}`);
+      }
+
+      console.info('oss_access_key_id:', oss_access_key_id);
+      console.info('policy:', policy);
+      console.info('signature:', signature);
+      console.info('upload_dir:', upload_dir);
+      const key = upload_dir + '/' + qwen3vlConfig.upload.fileName;
+      console.info('Uploading to:', upload_host);
+      console.info('Upload key:', key);
+
+      const formData = new FormData();
+      formData.append('OSSAccessKeyId', oss_access_key_id);
+      formData.append('policy', policy);
+      formData.append('Signature', signature);
+      formData.append('key', key);
+      formData.append('x-oss-object-acl', 'private');
+      formData.append('x-oss-forbid-overwrite', 'true');
+      formData.append('success_action_status', '200');
+      // 使用文件路径方式上传，与curl请求保持一致
+      formData.append('file', fs.createReadStream(captchaPath), {
+        filename: path.basename(captchaPath),
+        contentType: 'image/png',
+      });
+
+      const uploadResponse = await axios.post(upload_host, formData, {
+        timeout: qwen3vlConfig.request.timeout,
+        headers: {
+          ...formData.getHeaders(),
+          'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
+          Accept: '*/*',
+          Host: new URL(upload_host).hostname,
+          Connection: 'keep-alive',
+        },
+      });
+      console.info('File upload response:', uploadResponse.status);
+      console.info('File upload response data:', uploadResponse.data);
+    } catch (uploadError) {
+      console.error('File upload error:');
+    }
+
+    // 3. 使用 qwen3-vl-plus chat/completions 接口获取验证码结果
+    // 构建正确的OSS URL格式
+    const ossUrl = `oss://${upload_dir}/${qwen3vlConfig.upload.fileName}`;
+    console.info('OSS URL:', ossUrl);
+
+    try {
+      // 尝试使用兼容OpenAI格式的API调用
+      const requestData = {
+        model: qwen3vlConfig.model.name,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: ossUrl,
+                },
+              },
+              {
+                type: 'text',
+                text: qwen3vlConfig.captchaPrompt,
+              },
+            ],
+          },
+        ],
+        temperature: 0.0,
+      };
+
+      console.info(
+        'Sending chat completion request:',
+        JSON.stringify(requestData, null, 2)
+      );
+
+      // 尝试使用不同的API端点
+      const chatCompletionResponse = await axios.post(
+        qwen3vlConfig.getApiUrl(qwen3vlConfig.api.chatCompletionsPath),
+        JSON.stringify(requestData, null, 2),
+        {
+          headers: {
+            ...qwen3vlConfig.getAuthHeaders(),
+            'Content-Type': 'application/json',
+          },
+          timeout: qwen3vlConfig.request.timeout,
+        }
+      );
+
+      if (
+        !chatCompletionResponse.data.choices ||
+        !chatCompletionResponse.data.choices[0]
+      ) {
+        throw new Error('API响应格式不正确');
+      }
+
+      console.info(
+        'Chat completion response:',
+        chatCompletionResponse.data.choices[0].message.content
+      );
+
+      const captchaResult =
+        chatCompletionResponse.data.choices[0].message.content;
+
+      // 使用正则表达式提取验证码（支持多种格式）
+      let cleanedResult = '';
+
+      // 响应格式```\nw190\n```
+      // 使用正则表达式提取```\n和\n```之间的内容
+      const regex = /```\\n(.*?)\\n```/;
+      const match = captchaResult.match(regex);
+      if (match && match[1]) {
+        cleanedResult = match[1];
+      } else {
+        cleanedResult = captchaResult;
+      }
+
+      // 去除非字母数字字符
+      cleanedResult = cleanedResult.replace(/[^a-zA-Z0-9]/g, '').trim();
+      // 去除空格
+      cleanedResult = cleanedResult.replace(/\s+/g, '');
+
+      console.log('原始响应:', captchaResult);
+      console.log('提取的验证码:', cleanedResult);
+
+      return cleanedResult;
+    } catch (apiError) {
+      console.error('Chat completion API error:');
+    }
+  } catch (error) {
+    console.error('recognizeQwen3Vl error');
+  }
+};
+
+export { recognize, recognizeQwen3Vl };

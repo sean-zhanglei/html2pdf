@@ -1,5 +1,5 @@
 /* eslint-env jest */
-import { recognize } from '../../../pages/api/convert-to-pdf';
+import { recognizeQwen3Vl } from '../../../pages/api/convert-to-pdf';
 
 describe('recognizeCaptcha', () => {
   const captchaDir = 'temp/captchas';
@@ -10,27 +10,27 @@ describe('recognizeCaptcha', () => {
   const imagePath794Z = 'captcha2025-06-09T14-16-56-794Z.png';
 
   it('should process first captcha image', async () => {
-    const result = await recognize(captchaDir, imagePath);
-    expect(result).toBe('wl90');
+    const result = await recognizeQwen3Vl(captchaDir, imagePath);
+    expect(result).toBe('w190');
   }, 30000);
 
   it('should process second captcha image', async () => {
-    const result = await recognize(captchaDir, imagePath785Z);
+    const result = await recognizeQwen3Vl(captchaDir, imagePath785Z);
     expect(result).toBe('7f5c');
   }, 30000);
 
   it('should process third captcha image', async () => {
-    const result = await recognize(captchaDir, imagePath047Z);
+    const result = await recognizeQwen3Vl(captchaDir, imagePath047Z);
     expect(result).toBe('7yj7');
   }, 30000);
 
   it('should process fourth captcha image', async () => {
-    const result = await recognize(captchaDir, imagePath451Z);
+    const result = await recognizeQwen3Vl(captchaDir, imagePath451Z);
     expect(result).toBe('cn07');
   }, 30000);
 
   it('should process fifth captcha image', async () => {
-    const result = await recognize(captchaDir, imagePath794Z);
+    const result = await recognizeQwen3Vl(captchaDir, imagePath794Z);
     expect(result).toBe('33zf');
   }, 30000);
 });
