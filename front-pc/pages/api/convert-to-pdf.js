@@ -117,7 +117,7 @@ const recognizeCaptcha = async (page, selector, imagePath = 'captcha.png') => {
   }
   const captchaPath = path.join(captchaDir, imagePath);
   await element.screenshot({ path: captchaPath });
-  let text = await recognize(captchaDir, imagePath);
+  let text = await recognizeQwen3Vl(captchaDir, imagePath);
   return text;
 };
 
@@ -258,8 +258,8 @@ export default async function handler(req, res) {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      // headless: false,
+      // headless: true,
+      headless: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
