@@ -135,14 +135,111 @@ function isEdgePixel(image, x, y) {
   return Math.abs(center - left) > 50 || Math.abs(center - right) > 50;
 }
 
-async function clickButton(page, selector, timeout = 2000) {
+// 随机延迟函数
+const randomDelay = (min = 500, max = 2000) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
+// 兼容性延迟函数（替代page.waitForTimeout）
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 模拟人类点击行为
+async function humanClick(page, selector, timeout = 5000) {
   try {
     await page.waitForSelector(selector, { timeout });
-    await page.click(selector);
-    console.log(`✅ Clicked on element: ${selector}`);
+
+    // 随机延迟
+    await delay(randomDelay(300, 800));
+
+    // 获取元素位置
+    const element = await page.$(selector);
+    const box = await element.boundingBox();
+
+    if (!box) {
+      throw new Error('元素不可见或尺寸为0');
+    }
+
+    // 随机点击位置（在元素内部）
+    const clickX = box.x + Math.random() * box.width * 0.8 + box.width * 0.1;
+    const clickY = box.y + Math.random() * box.height * 0.8 + box.height * 0.1;
+
+    // 模拟鼠标移动和点击
+    await page.mouse.move(clickX, clickY, {
+      steps: Math.floor(Math.random() * 5) + 3,
+    });
+    await delay(randomDelay(100, 300));
+    await page.mouse.click(clickX, clickY);
+
+    console.log(`✅ 模拟点击元素: ${selector}`);
   } catch (error) {
-    console.error(`❌ Failed to click element: ${selector}`, error.message);
+    console.error(`❌ 点击元素失败: ${selector}`, error.message);
     throw error;
+  }
+}
+
+// 模拟人类输入行为
+async function humanType(page, selector, text, options = {}) {
+  const { clear = true } = options;
+
+  try {
+    await page.waitForSelector(selector, { timeout: 5000 });
+
+    if (clear) {
+      await page.click(selector, { clickCount: 3 }); // 全选
+      await page.keyboard.press('Backspace');
+    }
+
+    // 随机输入速度
+    const typeDelay = Math.floor(Math.random() * 100) + 30;
+
+    for (let i = 0; i < text.length; i++) {
+      await page.type(selector, text[i], { delay: typeDelay });
+
+      // 随机暂停（模拟思考）
+      if (Math.random() < 0.1) {
+        await delay(randomDelay(200, 800));
+      }
+    }
+
+    console.log(`✅ 模拟输入完成: ${selector}`);
+  } catch (error) {
+    console.error(`❌ 输入失败: ${selector}`, error.message);
+    throw error;
+  }
+}
+
+// 随机页面滚动
+async function randomScroll(page) {
+  const scrollAmount = Math.floor(Math.random() * 500) + 100;
+  const scrollDirection = Math.random() > 0.5 ? 'down' : 'up';
+
+  if (scrollDirection === 'down') {
+    await page.evaluate((amount) => {
+      window.scrollBy(0, amount);
+    }, scrollAmount);
+  } else {
+    await page.evaluate((amount) => {
+      window.scrollBy(0, -amount);
+    }, scrollAmount);
+  }
+
+  await delay(randomDelay(200, 600));
+}
+
+// 保持向后兼容的clickButton函数
+async function clickButton(page, selector, timeout = 2000) {
+  // 80%概率使用人类点击，20%概率使用快速点击
+  if (Math.random() < 0.8) {
+    await humanClick(page, selector, timeout);
+  } else {
+    try {
+      await page.waitForSelector(selector, { timeout });
+      await page.click(selector);
+      console.log(`✅ 快速点击元素: ${selector}`);
+    } catch (error) {
+      console.error(`❌ 快速点击元素失败: ${selector}`, error.message);
+      throw error;
+    }
   }
 }
 
@@ -177,12 +274,18 @@ async function tryLogin(page, timestamp, username, password) {
     // 清空输入框并等待
     await clearInputs();
 
-    // 输入用户名密码
-    await page.type('#account', username, { delay: 100, clear: true });
-    await page.type('#password', password, { delay: 100, clear: true });
+    // 输入用户名密码（使用人类输入行为）
+    await humanType(page, '#account', username, { clear: true });
+    await delay(randomDelay(500, 1000));
+    await humanType(page, '#password', password, { clear: true });
 
     // 处理验证码
     await page.waitForSelector('#verifyCode', { timeout: 10000 });
+
+    // 随机滚动页面
+    if (Math.random() < 0.7) {
+      await randomScroll(page);
+    }
 
     // Process captcha
     const element = await page.$('.ant-btn.ant-btn-image_btn');
@@ -209,8 +312,8 @@ async function tryLogin(page, timestamp, username, password) {
       throw new Error('Captcha recognition failed - empty result');
     }
 
-    // 输入验证码并点击登录
-    await page.type('#verifyCode', captchaText, { delay: 100, clear: true });
+    // 输入验证码（使用人类输入行为）
+    await humanType(page, '#verifyCode', captchaText, { clear: true });
 
     // Click login button
     await clickButton(
@@ -249,12 +352,296 @@ async function tryLogin(page, timestamp, username, password) {
   }
 }
 
+// 设备指纹配置
+const deviceFingerprints = [
+  {
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: { width: 1920, height: 1080 },
+    platform: 'Win32',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en-US', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    colorDepth: 24,
+    pixelDepth: 24,
+    screenResolution: { width: 1920, height: 1080 },
+    availableScreenResolution: { width: 1920, height: 1040 },
+  },
+  {
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    viewport: { width: 1366, height: 768 },
+    platform: 'Win32',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 4,
+    deviceMemory: 4,
+    colorDepth: 24,
+    pixelDepth: 24,
+    screenResolution: { width: 1366, height: 768 },
+    availableScreenResolution: { width: 1366, height: 728 },
+  },
+  {
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: { width: 1440, height: 900 },
+    platform: 'MacIntel',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en-US', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 6,
+    deviceMemory: 8,
+    colorDepth: 30,
+    pixelDepth: 30,
+    screenResolution: { width: 1440, height: 900 },
+    availableScreenResolution: { width: 1440, height: 860 },
+  },
+  {
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    viewport: { width: 1536, height: 864 },
+    platform: 'Win32',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en-US', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 8,
+    deviceMemory: 16,
+    colorDepth: 24,
+    pixelDepth: 24,
+    screenResolution: { width: 1536, height: 864 },
+    availableScreenResolution: { width: 1536, height: 824 },
+  },
+  {
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    viewport: { width: 1280, height: 720 },
+    platform: 'MacIntel',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 4,
+    deviceMemory: 8,
+    colorDepth: 30,
+    pixelDepth: 30,
+    screenResolution: { width: 1280, height: 720 },
+    availableScreenResolution: { width: 1280, height: 680 },
+  },
+  {
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36',
+    viewport: { width: 1920, height: 1080 },
+    platform: 'Win32',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en-US', 'en'],
+    timezone: 'Asia/Shanghai',
+    hardwareConcurrency: 12,
+    deviceMemory: 16,
+    colorDepth: 24,
+    pixelDepth: 24,
+    screenResolution: { width: 1920, height: 1080 },
+    availableScreenResolution: { width: 1920, height: 1040 },
+  },
+];
+
+// 环境指纹配置
+const environmentFingerprints = [
+  {
+    webglVendor: 'Google Inc. (Intel)',
+    webglRenderer:
+      'ANGLE (Intel, Intel(R) UHD Graphics 630 (0x000059A2) Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    canvasFingerprint: 'normal',
+    audioFingerprint: 'normal',
+    fonts: [
+      'Arial',
+      'Arial Black',
+      'Arial Narrow',
+      'Calibri',
+      'Cambria',
+      'Cambria Math',
+      'Comic Sans MS',
+      'Courier New',
+      'Georgia',
+      'Impact',
+      'Lucida Console',
+      'Lucida Sans Unicode',
+      'Microsoft Sans Serif',
+      'Palatino Linotype',
+      'Segoe UI',
+      'Tahoma',
+      'Times New Roman',
+      'Trebuchet MS',
+      'Verdana',
+    ],
+  },
+  {
+    webglVendor: 'Apple Inc. (Apple)',
+    webglRenderer: 'Apple GPU',
+    canvasFingerprint: 'apple',
+    audioFingerprint: 'apple',
+    fonts: [
+      'Arial',
+      'Arial Black',
+      'Arial Narrow',
+      'Arial Rounded MT Bold',
+      'Avenir',
+      'Avenir Next',
+      'Avenir Next Condensed',
+      'Baskerville',
+      'Big Caslon',
+      'Bodoni 72',
+      'Bodoni 72 Oldstyle',
+      'Bodoni 72 Smallcaps',
+      'Bradley Hand',
+      'Brush Script MT',
+      'Chalkboard',
+      'Chalkboard SE',
+      'Chalkduster',
+      'Cochin',
+      'Comic Sans MS',
+      'Copperplate',
+      'Courier',
+      'Courier New',
+      'Didot',
+      'Futura',
+      'Geneva',
+      'Georgia',
+      'Gill Sans',
+      'Helvetica',
+      'Helvetica Neue',
+      'Herculanum',
+      'Hoefler Text',
+      'Impact',
+      'Lucida Grande',
+      'Luminari',
+      'Marker Felt',
+      'Menlo',
+      'Microsoft Sans Serif',
+      'Monaco',
+      'Noteworthy',
+      'Optima',
+      'Palatino',
+      'Papyrus',
+      'Phosphate',
+      'Rockwell',
+      'Savoye LET',
+      'SignPainter',
+      'Skia',
+      'Snell Roundhand',
+      'Tahoma',
+      'Times',
+      'Times New Roman',
+      'Trebuchet MS',
+      'Verdana',
+      'Zapfino',
+    ],
+  },
+  {
+    webglVendor: 'Mozilla (Mozilla)',
+    webglRenderer: 'Mozilla',
+    canvasFingerprint: 'firefox',
+    audioFingerprint: 'firefox',
+    fonts: [
+      'Arial',
+      'Arial Black',
+      'Arial Narrow',
+      'Arial Rounded MT Bold',
+      'Baskerville',
+      'Big Caslon',
+      'Bodoni MT',
+      'Book Antiqua',
+      'Bookman Old Style',
+      'Calibri',
+      'Cambria',
+      'Cambria Math',
+      'Century',
+      'Century Gothic',
+      'Century Schoolbook',
+      'Comic Sans MS',
+      'Consolas',
+      'Constantia',
+      'Corbel',
+      'Courier New',
+      'DejaVu Sans',
+      'DejaVu Sans Mono',
+      'DejaVu Serif',
+      'Ebrima',
+      'Franklin Gothic Medium',
+      'Gabriola',
+      'Garamond',
+      'Georgia',
+      'Impact',
+      'Javanese Text',
+      'Leelawadee UI',
+      'Lucida Console',
+      'Lucida Sans Unicode',
+      'Malgun Gothic',
+      'Marlett',
+      'Microsoft Himalaya',
+      'Microsoft JhengHei',
+      'Microsoft New Tai Lue',
+      'Microsoft PhagsPa',
+      'Microsoft Sans Serif',
+      'Microsoft Tai Le',
+      'Microsoft YaHei',
+      'Microsoft Yi Baiti',
+      'MingLiU-ExtB',
+      'Mongolian Baiti',
+      'MS Gothic',
+      'MS PGothic',
+      'MS UI Gothic',
+      'MV Boli',
+      'Myanmar Text',
+      'Nirmala UI',
+      'Palatino Linotype',
+      'Segoe Print',
+      'Segoe Script',
+      'Segoe UI',
+      'Segoe UI Historic',
+      'Segoe UI Emoji',
+      'Segoe UI Symbol',
+      'SimSun',
+      'Sitka',
+      'Sylfaen',
+      'Symbol',
+      'Tahoma',
+      'Times New Roman',
+      'Trebuchet MS',
+      'Verdana',
+      'Webdings',
+      'Wingdings',
+      'Yu Gothic',
+    ],
+  },
+];
+
+// 代理服务器配置
+const proxyConfigs = [
+  // 国内代理服务器（可选）
+  // {
+  //   server: 'http://proxy1.example.com:8080',
+  //   username: 'user',
+  //   password: 'pass'
+  // },
+  // 更多代理服务器...
+];
+
+// 获取随机代理配置
+function getRandomProxy() {
+  if (proxyConfigs.length === 0) {
+    return null;
+  }
+  return proxyConfigs[Math.floor(Math.random() * proxyConfigs.length)];
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { username, password, websiteUrl, selector } = req.body;
+  const { username, password, websiteUrl, selector, proxy } = req.body;
 
   console.log('Received request:', req.body);
 
@@ -266,25 +653,216 @@ export default async function handler(req, res) {
 
   let browser;
   try {
+    // 随机选择设备指纹
+    const deviceFingerprint =
+      deviceFingerprints[Math.floor(Math.random() * deviceFingerprints.length)];
+    const environmentFingerprint =
+      environmentFingerprints[
+        Math.floor(Math.random() * environmentFingerprints.length)
+      ];
+
+    // 构建启动参数
+    const launchArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-blink-features=AutomationControlled',
+      `--window-size=${deviceFingerprint.viewport.width},${deviceFingerprint.viewport.height}`,
+      '--enable-webgl',
+      '--enable-accelerated-2d-canvas',
+      '--enable-gpu-rasterization',
+      '--enable-zero-copy',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      // 添加IP相关配置
+      '--disable-features=VizDisplayCompositor',
+      '--disable-back-forward-cache',
+      '--disable-component-extensions-with-background-pages',
+      '--disable-default-apps',
+      '--disable-extensions',
+      '--disable-translate',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--safebrowsing-disable-auto-update',
+      '--disable-client-side-phishing-detection',
+      '--disable-popup-blocking',
+      '--disable-prompt-on-repost',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-hang-monitor',
+      '--disable-ipc-flooding-protection',
+      '--disable-prompt-on-repost',
+      '--disable-domain-reliability',
+      '--disable-features=AudioServiceOutOfProcess',
+      '--disable-site-isolation-trials',
+      '--disable-web-resources',
+      '--disable-back-forward-cache',
+      '--disable-component-extensions-with-background-pages',
+    ];
+
+    // 处理代理配置
+    let proxyArgs = '';
+    if (proxy) {
+      // 使用请求中指定的代理
+      proxyArgs = `--proxy-server=${proxy}`;
+    } else {
+      // 随机选择代理
+      const randomProxy = getRandomProxy();
+      if (randomProxy) {
+        if (randomProxy.username && randomProxy.password) {
+          proxyArgs = `--proxy-server=${randomProxy.server} --proxy-auth=${randomProxy.username}:${randomProxy.password}`;
+        } else {
+          proxyArgs = `--proxy-server=${randomProxy.server}`;
+        }
+      }
+    }
+
+    if (proxyArgs) {
+      launchArgs.push(proxyArgs);
+    }
+
     browser = await puppeteer.launch({
       headless: true,
       // headless: false,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--window-size=2000,3600',
-      ],
-      slowMo: 100, // 减慢操作速度（单位：毫秒），便于观察
+      args: launchArgs,
+      slowMo: Math.floor(Math.random() * 50) + 50, // 随机延迟50-100ms
     });
 
     const page = await browser.newPage();
 
+    // 设置完整的设备指纹
+    await page.setUserAgent(deviceFingerprint.userAgent);
     await page.setViewport({
-      width: 2000, // 设置视口宽度
-      height: 3600, // 设置视口高度
+      width: deviceFingerprint.viewport.width,
+      height: deviceFingerprint.viewport.height,
       deviceScaleFactor: 1,
     });
+
+    // 设置完整的设备环境指纹
+    await page.evaluateOnNewDocument(
+      (device, env) => {
+        // 基础设备信息
+        Object.defineProperty(navigator, 'platform', {
+          get: () => device.platform,
+        });
+        Object.defineProperty(navigator, 'language', {
+          get: () => device.language,
+        });
+        Object.defineProperty(navigator, 'languages', {
+          get: () => device.languages,
+        });
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => device.hardwareConcurrency,
+        });
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => device.deviceMemory,
+        });
+
+        // 屏幕信息
+        Object.defineProperty(screen, 'colorDepth', {
+          get: () => device.colorDepth,
+        });
+        Object.defineProperty(screen, 'pixelDepth', {
+          get: () => device.pixelDepth,
+        });
+
+        // 时区
+        Object.defineProperty(
+          Intl.DateTimeFormat().resolvedOptions(),
+          'timeZone',
+          {
+            get: () => device.timezone,
+          }
+        );
+
+        // WebGL信息
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function (parameter) {
+          if (parameter === 37445) {
+            // UNMASKED_VENDOR_WEBGL
+            return env.webglVendor;
+          }
+          if (parameter === 37446) {
+            // UNMASKED_RENDERER_WEBGL
+            return env.webglRenderer;
+          }
+          return getParameter.call(this, parameter);
+        };
+
+        // Canvas指纹
+        HTMLCanvasElement.prototype.getContext = function (
+          contextType,
+          contextAttributes
+        ) {
+          const context = Object.getPrototypeOf(this).getContext.call(
+            this,
+            contextType,
+            contextAttributes
+          );
+          if (contextType === '2d') {
+            const getImageData = context.getImageData;
+            context.getImageData = function (...args) {
+              const imageData = getImageData.apply(this, args);
+              // 添加轻微的随机噪声
+              for (let i = 0; i < imageData.data.length; i += 4) {
+                if (Math.random() < 0.01) {
+                  imageData.data[i] = Math.min(
+                    255,
+                    imageData.data[i] + Math.floor(Math.random() * 3) - 1
+                  );
+                  imageData.data[i + 1] = Math.min(
+                    255,
+                    imageData.data[i + 1] + Math.floor(Math.random() * 3) - 1
+                  );
+                  imageData.data[i + 2] = Math.min(
+                    255,
+                    imageData.data[i + 2] + Math.floor(Math.random() * 3) - 1
+                  );
+                }
+              }
+              return imageData;
+            };
+          }
+          return context;
+        };
+
+        // 字体检测
+        Object.defineProperty(document, 'fonts', {
+          value: {
+            check: () => Promise.resolve(true),
+            ready: Promise.resolve(),
+            add: () => {},
+            delete: () => {},
+            clear: () => {},
+            forEach: () => {},
+            has: () => true,
+            size: env.fonts.length,
+            [Symbol.iterator]: function* () {
+              for (const font of env.fonts) {
+                yield font;
+              }
+            },
+          },
+        });
+
+        // 隐藏自动化特征
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
+      },
+      deviceFingerprint,
+      environmentFingerprint
+    );
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
