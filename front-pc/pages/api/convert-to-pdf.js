@@ -146,9 +146,7 @@ async function clickButton(page, selector, timeout = 2000) {
   }
 }
 
-async function tryLogin(page, timestamp, username, password, maxAttempts = 1) {
-  let attempts = 0;
-
+async function tryLogin(page, timestamp, username, password) {
   const clearInputs = async () => {
     await page.evaluate(() => {
       const accountInput = document.querySelector('#account');
@@ -173,60 +171,56 @@ async function tryLogin(page, timestamp, username, password, maxAttempts = 1) {
     );
   };
 
-  while (attempts < maxAttempts) {
-    try {
-      attempts++;
-      console.log(`尝试登录 (第 ${attempts} 次)`);
+  try {
+    console.log('尝试登录');
 
-      // 清空输入框并等待
-      await clearInputs();
+    // 清空输入框并等待
+    await clearInputs();
 
-      // 输入用户名密码
-      await page.type('#account', username, { delay: 100, clear: true });
-      await page.type('#password', password, { delay: 100, clear: true });
+    // 输入用户名密码
+    await page.type('#account', username, { delay: 100, clear: true });
+    await page.type('#password', password, { delay: 100, clear: true });
 
-      // 处理验证码
-      await page.waitForSelector('#verifyCode', { timeout: 2000 });
+    // 处理验证码
+    await page.waitForSelector('#verifyCode', { timeout: 2000 });
 
-      const element = await page.$('.ant-btn.ant-btn-image_btn');
-      if (!element) throw new Error('Captcha element not found');
+    const element = await page.$('.ant-btn.ant-btn-image_btn');
+    if (!element) throw new Error('Captcha element not found');
 
-      // 生成captchas png 并保存到本地
-      const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
-      if (!fs.existsSync(captchaDir)) {
-        fs.mkdirSync(captchaDir, { recursive: true });
-      }
-
-      const imagePath = `${timestamp}-captcha.png`;
-      // 替换原有的路径拼接代码
-      const captchaPath = path.join(captchaDir, imagePath);
-      await element.screenshot({ path: captchaPath });
-
-      const captchaText = await recognizeCaptcha(captchaDir, imagePath);
-
-      // 输入验证码并点击登录
-      await page.type('#verifyCode', captchaText, { delay: 100, clear: true });
-      await clickButton(
-        page,
-        '.login___3SZNV > .btns___H31yA > button:nth-child(1)',
-        2000
-      );
-
-      // 检查是否登录成功
-      const token = await page.evaluate(() => localStorage.getItem('TOKEN'));
-      if (token) {
-        console.log('登录成功，TOKEN:', token);
-        return true;
-      } else {
-        console.log('登录失败，TOKEN未找到');
-        await clearInputs(); // 登录失败后清空输入框
-      }
-    } catch (error) {
-      console.error(`登录尝试 ${attempts} 失败:`, error);
-      if (attempts >= maxAttempts) throw error;
+    // 生成captchas png 并保存到本地
+    const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
+    if (!fs.existsSync(captchaDir)) {
+      fs.mkdirSync(captchaDir, { recursive: true });
     }
+
+    const imagePath = `${timestamp}-captcha.png`;
+    // 替换原有的路径拼接代码
+    const captchaPath = path.join(captchaDir, imagePath);
+    await element.screenshot({ path: captchaPath });
+
+    const captchaText = await recognizeCaptcha(captchaDir, imagePath);
+
+    // 输入验证码并点击登录
+    await page.type('#verifyCode', captchaText, { delay: 100, clear: true });
+    await clickButton(
+      page,
+      '.login___3SZNV > .btns___H31yA > button:nth-child(1)',
+      2000
+    );
+
+    // 检查是否登录成功
+    const token = await page.evaluate(() => localStorage.getItem('TOKEN'));
+    if (token) {
+      console.log('登录成功，TOKEN:', token);
+      return true;
+    } else {
+      console.log('登录失败，TOKEN未找到');
+      return false;
+    }
+  } catch (error) {
+    console.error('登录失败:', error);
+    throw new Error('登录失败');
   }
-  return false;
 }
 
 export default async function handler(req, res) {
@@ -355,15 +349,9 @@ export default async function handler(req, res) {
       );
 
       // 替换原有的登录代码
-      const loginSuccess = await tryLogin(
-        page,
-        timestamp,
-        username,
-        password,
-        1
-      );
+      const loginSuccess = await tryLogin(page, timestamp, username, password);
       if (!loginSuccess) {
-        throw new Error('登录失败，已达最大重试次数');
+        throw new Error('登录失败');
       }
 
       // 登录成功后继续后续操作
