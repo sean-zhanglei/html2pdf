@@ -167,7 +167,7 @@ async function tryLogin(page, timestamp, username, password) {
           (!verify || verify.value === '')
         );
       },
-      { timeout: 2000 }
+      { timeout: 10000 }
     );
   };
 
@@ -182,39 +182,65 @@ async function tryLogin(page, timestamp, username, password) {
     await page.type('#password', password, { delay: 100, clear: true });
 
     // 处理验证码
-    await page.waitForSelector('#verifyCode', { timeout: 2000 });
+    await page.waitForSelector('#verifyCode', { timeout: 10000 });
 
+    // Process captcha
     const element = await page.$('.ant-btn.ant-btn-image_btn');
     if (!element) throw new Error('Captcha element not found');
 
-    // 生成captchas png 并保存到本地
+    // Generate captcha PNG and save locally
     const captchaDir = path.join(process.cwd(), 'temp', 'captchas');
     if (!fs.existsSync(captchaDir)) {
       fs.mkdirSync(captchaDir, { recursive: true });
     }
 
     const imagePath = `${timestamp}-captcha.png`;
-    // 替换原有的路径拼接代码
     const captchaPath = path.join(captchaDir, imagePath);
     await element.screenshot({ path: captchaPath });
 
     const captchaText = await recognizeCaptcha(captchaDir, imagePath);
 
+    // Clean up temporary captcha file immediately after recognition
+    if (fs.existsSync(captchaPath)) {
+      fs.unlinkSync(captchaPath);
+    }
+
+    if (!captchaText || captchaText.trim() === '') {
+      throw new Error('Captcha recognition failed - empty result');
+    }
+
     // 输入验证码并点击登录
     await page.type('#verifyCode', captchaText, { delay: 100, clear: true });
+
+    // Click login button
     await clickButton(
       page,
       '.login___3SZNV > .btns___H31yA > button:nth-child(1)',
-      2000
+      10000
     );
 
-    // 检查是否登录成功
+    try {
+      await page.waitForSelector('.user_block___2sFge', { timeout: 10000 });
+      console.log('检测到登录后元素');
+    } catch (elementError) {
+      console.log('未检测登录后元素');
+    }
+
+    // 检查认证状态
+    const isLoggedIn = await page.evaluate(() => {
+      // 检查多个可能的认证指示器
+      const hasToken =
+        localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
+      const hasUserBlock = document.querySelector('.user_block___2sFge');
+      return !!hasToken || !!hasUserBlock;
+    });
+    // Check if login was successful
     const token = await page.evaluate(() => localStorage.getItem('TOKEN'));
-    if (token) {
+    if (isLoggedIn) {
       console.log('登录成功，TOKEN:', token);
       return true;
     } else {
-      console.log('登录失败，TOKEN未找到');
+      console.log('登录失败');
       return false;
     }
   } catch (error) {
@@ -260,79 +286,6 @@ export default async function handler(req, res) {
       deviceScaleFactor: 1,
     });
 
-    // 🚀 设置自定义请求头
-    // await page.setExtraHTTPHeaders({
-    //   'Authorization': 'Bearer ' + token,
-    //   'LoginWay': '1',
-    //   'UserId': userId,
-    //   'ZoneNo': zoneNo
-    // });
-
-    // 设置响应拦截器
-    // page.on('response', async (response) => {
-    //   console.log('Response URL:', response.url());
-    //   if (response.url().includes('job.icbc.com.cn/icbc/trmo')) {
-    //     console.log('Matching response URL:', response.url());
-    //     let headers = response.headers();
-    //     let token = headers['token'];
-    //     headers['ZoneNo'] && (N = headers['ZoneNo']), token && (headers['UserId'] && await le(headers['UserId']), await F(token)), response;
-    //   }
-    // });
-
-    // async function F(e) {
-    //   console.log("set token", e);
-    //   // 设置 localStorage
-    //   await page.emulate((e) => {
-    //     localStorage.setItem("TOKEN", e);
-    //   }, e);
-
-    //   // 设置 sessionStorage
-    //   await page.evaluate((e) => {
-    //     sessionStorage.setItem("TOKEN", e);
-    //   }, e);
-    // }
-
-    // async function X(e) {
-    //   console.log("set ZoneNo", e);
-    //   // 设置 localStorage
-    //   await page.emulate((e) => {
-    //     localStorage.setItem("ZoneFlag", e);
-    //   }, e);
-
-    //   // 设置 sessionStorage
-    //   await page.evaluate((e) => {
-    //     sessionStorage.setItem("ZoneFlag", e);
-    //   }, e);
-
-    //   await page.setExtraHTTPHeaders({
-    //     'ZoneFlag': e
-    //   });
-    // }
-    // async function le(e) {
-    //   console.log("set Id", e);
-    //   O = e, await X(O.substr(0, 2)),
-
-    //   // 设置 localStorage
-    //   await page.emulate((e) => {
-    //     localStorage.setItem("ID", e);
-    //   }, e);
-
-    //   // 设置 sessionStorage
-    //   await page.evaluate((e) => {
-    //     sessionStorage.setItem("ID", e)
-    //   }, e);
-    // }
-
-    // 清空 sessionStorage
-    // await page.evaluate(() => {
-    //   sessionStorage.clear();
-    // });
-
-    // 清空 localStorage
-    // await page.evaluate(() => {
-    //   localStorage.clear();
-    // });
-
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     if (websiteUrl.indexOf('job.icbc.com.cn') !== -1) {
@@ -360,19 +313,19 @@ export default async function handler(req, res) {
       await clickButton(
         page,
         '.user_block___2sFge > .block_3___1ClCH > .icon___2siAf > i',
-        2000
+        10000
       );
 
       // 点击简历详情，跳转https://job.icbc.com.cn/pc/index.html#/main/resumePreview/0
       await clickButton(
         page,
         '.item___3m969 > .item-right___2wu38 > button:nth-child(1)',
-        2000
+        10000
       );
 
       // 等待页面加载完成 开始生成PDF
       await page.waitForSelector('.live-photo___2oydI > .avatar___3v9kT', {
-        timeout: 3000,
+        timeout: 10000,
       });
     } else {
       const navigationPromiseHome = page.waitForNavigation();
