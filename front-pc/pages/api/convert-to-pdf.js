@@ -484,7 +484,7 @@ async function handlePhoneVerification(page) {
   try {
     // 等待手机验证码输入框出现
     await page.waitForSelector('.phoneVerify___NiGOL', {
-      timeout: 5000,
+      timeout: 10000,
     });
     console.log('✅ 检测到手机验证码输入框');
 
@@ -531,7 +531,7 @@ async function tryLogin(page, timestamp, username, password) {
     // 清空输入框并等待
     await clearInputs();
     // 等待显示登录框
-    await delay(randomDelay(3000, 5000));
+    await delay(randomDelay(5000, 10000));
     // 输入用户名密码（使用人类输入行为）
     await humanType(page, '#account', username, { clear: true });
     await delay(randomDelay(500, 1000));
@@ -1096,7 +1096,7 @@ export default async function handler(req, res) {
         if (isLoggedIn) {
           console.log('验证码验证成功，继续PDF生成流程');
 
-          // 继续后续操作（简历页面导航等）
+          // 继续后续操作
           // 点击简历箭头
           await clickButton(
             session.page,
@@ -1119,73 +1119,8 @@ export default async function handler(req, res) {
             }
           );
 
-          // 生成PDF（继续使用原有逻辑）
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const pdfDir = path.join(process.cwd(), 'temp');
-          if (!fs.existsSync(pdfDir)) {
-            fs.mkdirSync(pdfDir, { recursive: true });
-          }
-
-          const pdfFileName = `${timestamp}.pdf`;
-          const pdfPath = path.join(pdfDir, pdfFileName);
-
-          // 获取目标元素
-          await session.page.waitForSelector(selector, { timeout: 3000 });
-          const element = await session.page.$(selector);
-          if (!element) {
-            return res.status(404).json({
-              success: false,
-              message: `未找到元素: ${selector}`,
-            });
-          }
-
-          const box = await element.boundingBox();
-          if (!box) {
-            throw new Error('元素不可见或尺寸为0');
-          }
-
-          // 生成PDF并保存
-          const tempDir = path.join(process.cwd(), 'temp', 'images');
-          const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
-
-          try {
-            if (!fs.existsSync(tempDir)) {
-              fs.mkdirSync(tempDir, { recursive: true });
-            }
-
-            await element.screenshot({ path: tempImagePath, type: 'png' });
-            const imageBytes = fs.readFileSync(tempImagePath);
-            const pdfDoc = await PDFDocument.create();
-            const margin = 20;
-            const pageWidth = box.width + margin * 2;
-            const pageHeight = box.height;
-
-            const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
-            const embeddedImage = await pdfDoc.embedPng(imageBytes);
-            pdfPage.drawImage(embeddedImage, {
-              x: margin,
-              y: 0,
-              width: box.width,
-              height: box.height,
-            });
-            const pdfBytes = await pdfDoc.save();
-            fs.writeFileSync(pdfPath, pdfBytes);
-            fs.unlinkSync(tempImagePath);
-
-            // 清理会话
-            sessionStore.delete(sessionId);
-
-            res.status(200).json({
-              success: true,
-              pdfUrl: `/api/download?file=${pdfFileName}`,
-              message: 'PDF生成成功，请通过链接下载',
-            });
-          } catch (error) {
-            if (fs.existsSync(tempImagePath)) {
-              fs.unlinkSync(tempImagePath);
-            }
-            throw error;
-          }
+          // 生成PDF并保存到本地
+          await generatePdf(res, page, selector);
         } else {
           throw new Error('验证码验证失败');
         }
@@ -1199,6 +1134,11 @@ export default async function handler(req, res) {
         });
       }
       return;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: '缺少验证码，请提供验证码以继续',
+      });
     }
   }
 
@@ -1469,97 +1409,8 @@ export default async function handler(req, res) {
       await navigationPromiseHome;
     }
 
-    // Get the element dimensions
-
     // 生成PDF并保存到本地
-    const pdfDir = path.join(process.cwd(), 'temp');
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-    }
-
-    const pdfFileName = `${timestamp}.pdf`;
-    const pdfPath = path.join(pdfDir, pdfFileName);
-
-    // 获取目标元素
-    await page.waitForSelector(selector, { timeout: 3000 });
-    const element = await page.$(selector);
-    if (!element) {
-      return res.status(404).json({
-        success: false,
-        message: `未找到元素: ${selector}`,
-      });
-    }
-
-    // 获取元素尺寸
-    const box = await element.boundingBox();
-    if (!box) {
-      throw new Error('元素不可见或尺寸为0');
-    }
-    console.log('元素尺寸:', box);
-
-    // 生成PDF并保存到本地
-    const tempDir = path.join(process.cwd(), 'temp', 'images');
-    // 截图并保存到临时目录
-    const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
-
-    try {
-      // 确保临时目录存在
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      await element.screenshot({
-        path: tempImagePath,
-        type: 'png',
-      });
-
-      // 转换为PDF
-      // 读取截图文件
-      const imageBytes = fs.readFileSync(tempImagePath);
-      const pdfDoc = await PDFDocument.create();
-      // 计算带边距的页面尺寸
-      const margin = 20;
-      // 左右边距20px
-      const pageWidth = box.width + margin * 2;
-      const pageHeight = box.height;
-
-      const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
-      const embeddedImage = await pdfDoc.embedPng(imageBytes);
-      pdfPage.drawImage(embeddedImage, {
-        x: margin,
-        y: 0,
-        width: box.width,
-        height: box.height,
-      });
-      const pdfBytes = await pdfDoc.save();
-      console.log('Write file:', pdfFileName);
-      fs.writeFileSync(pdfPath, pdfBytes);
-
-      // 清理临时文件
-      fs.unlinkSync(tempImagePath);
-    } catch (error) {
-      // 错误处理
-      console.error('PDF生成错误:', error);
-      // 确保清理临时文件
-      if (fs.existsSync(tempImagePath)) {
-        fs.unlinkSync(tempImagePath);
-      }
-      throw error;
-    }
-
-    // 生成PDF（仅截取目标元素区域）
-    // await page.pdf({
-    //   path: pdfPath,
-    //   printBackground: true,
-    //   clip: box
-    // });
-
-    // 返回下载链接而非文件内容
-    res.status(200).json({
-      success: true,
-      pdfUrl: `/api/download?file=${pdfFileName}`,
-      message: 'PDF生成成功，请通过链接下载',
-    });
+    await generatePdf(res, page, selector);
   } catch (error) {
     console.error('PDF generation error:', error);
 
@@ -1605,6 +1456,103 @@ export default async function handler(req, res) {
     }
   }
 }
+
+// 生成Pdf文件
+export const generatePdf = async (res, page, selector) => {
+  const pdfDir = path.join(process.cwd(), 'temp');
+  if (!fs.existsSync(pdfDir)) {
+    fs.mkdirSync(pdfDir, { recursive: true });
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const pdfFileName = `${timestamp}.pdf`;
+  const pdfPath = path.join(pdfDir, pdfFileName);
+
+  await delay(randomDelay(5000, 10000));
+  // 获取目标元素
+  await page.waitForSelector(selector, { timeout: 10000 });
+  const element = await page.$(selector);
+  if (!element) {
+    return res.status(404).json({
+      success: false,
+      message: `未找到元素: ${selector}`,
+    });
+  }
+
+  const boxOld = await element.boundingBox();
+  if (!boxOld) {
+    throw new Error('元素不可见或尺寸为0');
+  }
+  console.log('元素尺寸Old:', boxOld);
+
+  // 获取元素的位置和尺寸
+  const elementInfo = await page.evaluate(
+    ({ selector, boxOld }) => {
+      const element = document.querySelector(selector);
+      return {
+        scrollHeight: element.scrollHeight + boxOld.y,
+        width: element.scrollWidth,
+      };
+    },
+    { selector, boxOld }
+  );
+
+  // 重新设置视窗高度为元素的完整高度
+  await page.setViewport({
+    width: Math.max(1920, elementInfo.width),
+    height: elementInfo.scrollHeight,
+    deviceScaleFactor: 1,
+  });
+
+  const boxNew = await element.boundingBox();
+  if (!boxNew) {
+    throw new Error('元素不可见或尺寸为0');
+  }
+  console.log('元素尺寸New:', boxNew);
+
+  const tempDir = path.join(process.cwd(), 'temp', 'images');
+  const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
+
+  try {
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    await element.screenshot({ path: tempImagePath, type: 'png' });
+    const imageBytes = fs.readFileSync(tempImagePath);
+    const pdfDoc = await PDFDocument.create();
+    // 计算带边距的页面尺寸
+    const margin = 20;
+    // 左右边距20px
+    const pageWidth = boxNew.width + margin * 2;
+    const pageHeight = elementInfo.scrollHeight;
+
+    const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+    const embeddedImage = await pdfDoc.embedPng(imageBytes);
+    pdfPage.drawImage(embeddedImage, {
+      x: margin,
+      y: 0,
+      width: boxNew.width,
+      height: pageHeight,
+    });
+    const pdfBytes = await pdfDoc.save();
+    fs.writeFileSync(pdfPath, pdfBytes);
+    // fs.unlinkSync(tempImagePath);
+
+    res.status(200).json({
+      success: true,
+      pdfUrl: `/api/download?file=${pdfFileName}`,
+      message: 'PDF生成成功，请通过链接下载',
+    });
+  } catch (error) {
+    if (fs.existsSync(tempImagePath)) {
+      fs.unlinkSync(tempImagePath);
+    }
+    throw error;
+  }
+
+  console.log('PDF文件生成成功:', pdfFileName);
+};
 
 // 新增recognizeQwen3Vl函数
 const recognizeQwen3Vl = async (captchaDir, imagePath) => {
