@@ -431,6 +431,229 @@ async function clickButton(page, selector, timeout = 2000) {
   }
 }
 
+/**
+ * 处理手机验证码验证
+ * @param {Object} page - Puppeteer页面对象
+ * @returns {Promise<boolean>} 验证是否成功
+ */
+async function handlePhoneVerification(page) {
+  // 等待手机验证码输入框出现
+  await page.waitForSelector('.phoneVerify___NiGOL', {
+    timeout: 50000,
+  });
+  console.log('✅ 检测到手机验证码输入框');
+
+  // 等待用户输入验证码
+  const verificationCode = await waitForPhoneCodeInput();
+
+  if (verificationCode) {
+    console.log(`✅ 获取到验证码: ${verificationCode}`);
+    // 输入验证码
+    await humanType(page, '#phoneVerifyCode', verificationCode, {
+      clear: true,
+    });
+    await delay(randomDelay(500, 1000));
+
+    // 检查是否有确认按钮
+    const sendButtonSelector = '.btns___JomC2';
+    const hasSendButton = await page.$(sendButtonSelector);
+
+    if (hasSendButton) {
+      console.log('检测到确认按钮，点击确认...');
+      await clickButton(page, '.btns___JomC2 > button:nth-child(1)', 2000);
+      await delay(randomDelay(1000, 2000));
+      return true;
+    } else {
+      console.log('❌ 未检测到确认按钮，跳过点击');
+      return false;
+    }
+  } else {
+    console.log('❌ 未获取到验证码，跳过输入');
+    return false;
+  }
+}
+
+/**
+ * 等待用户输入手机验证码（可扩展为多种输入方式）
+ * @returns {Promise<string|null>} 验证码或null
+ */
+async function waitForPhoneCodeInput() {
+  return new Promise((resolve) => {
+    // 创建模态框容器
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+    `;
+
+    // 创建模态框内容
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      min-width: 300px;
+      text-align: center;
+    `;
+
+    // 创建标题
+    const title = document.createElement('h3');
+    title.textContent = '请输入手机验证码';
+    title.style.cssText = `
+      margin: 0 0 20px 0;
+      color: #333;
+      font-size: 18px;
+    `;
+
+    // 创建输入框
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = '请输入6位验证码';
+    input.maxLength = 6;
+    input.style.cssText = `
+      width: 200px;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+      font-size: 16px;
+      text-align: center;
+      margin-bottom: 20px;
+      outline: none;
+      transition: border-color 0.3s;
+    `;
+
+    input.addEventListener('focus', () => {
+      input.style.borderColor = '#007bff';
+    });
+
+    input.addEventListener('blur', () => {
+      input.style.borderColor = '#ddd';
+    });
+
+    // 创建按钮容器
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    `;
+
+    // 创建确认按钮
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = '确认';
+    confirmBtn.style.cssText = `
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.3s;
+    `;
+
+    confirmBtn.addEventListener('mouseenter', () => {
+      confirmBtn.style.backgroundColor = '#0056b3';
+    });
+
+    confirmBtn.addEventListener('mouseleave', () => {
+      confirmBtn.style.backgroundColor = '#007bff';
+    });
+
+    // 创建取消按钮
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '取消';
+    cancelBtn.style.cssText = `
+      padding: 10px 20px;
+      background-color: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.3s;
+    `;
+
+    cancelBtn.addEventListener('mouseenter', () => {
+      cancelBtn.style.backgroundColor = '#545b62';
+    });
+
+    cancelBtn.addEventListener('mouseleave', () => {
+      cancelBtn.style.backgroundColor = '#6c757d';
+    });
+
+    // 组装模态框
+    modalContent.appendChild(title);
+    modalContent.appendChild(input);
+    buttonContainer.appendChild(confirmBtn);
+    buttonContainer.appendChild(cancelBtn);
+    modalContent.appendChild(buttonContainer);
+    modal.appendChild(modalContent);
+
+    // 添加到页面
+    document.body.appendChild(modal);
+
+    // 自动聚焦输入框
+    input.focus();
+
+    // 确认按钮点击事件
+    const handleConfirm = () => {
+      const code = input.value.trim();
+
+      if (code.length === 6 && /^\d+$/.test(code)) {
+        // 移除模态框
+        document.body.removeChild(modal);
+        resolve(code);
+      } else {
+        alert('请输入6位数字验证码');
+        input.focus();
+        input.select();
+      }
+    };
+
+    // 取消按钮点击事件
+    const handleCancel = () => {
+      document.body.removeChild(modal);
+      resolve(null);
+    };
+
+    // 绑定事件
+    confirmBtn.addEventListener('click', handleConfirm);
+    cancelBtn.addEventListener('click', handleCancel);
+
+    // 回车键确认
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handleConfirm();
+      }
+    });
+
+    // ESC键取消
+    modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        handleCancel();
+      }
+    });
+
+    // 点击背景取消
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        handleCancel();
+      }
+    });
+  });
+}
+
 async function tryLogin(page, timestamp, username, password) {
   const clearInputs = async () => {
     await page.evaluate(() => {
@@ -509,6 +732,13 @@ async function tryLogin(page, timestamp, username, password) {
       '.login___3SZNV > .btns___H31yA > button:nth-child(1)',
       10000
     );
+
+    // 处理手机验证码
+    const checkCode = await handlePhoneVerification(page);
+
+    if (!checkCode) {
+      return false;
+    }
 
     try {
       await page.waitForSelector('.user_block___2sFge', { timeout: 10000 });
