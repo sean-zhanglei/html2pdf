@@ -10,6 +10,10 @@ export default function Home() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
 
   const handleConvertToPdf = async () => {
     if (!websiteUrl) {
@@ -38,6 +42,15 @@ export default function Home() {
       }
       const result = await response.json();
       console.log(result);
+
+      // 检查是否需要验证码
+      if (result.needsVerification) {
+        setNeedsVerification(true);
+        setCurrentSessionId(result.sessionId);
+        alert('需要输入手机验证码，请输入验证码并确认');
+        return;
+      }
+
       setPdfOutput(result.pdfUrl);
       alert('PDF generated successfully! You can download it below.');
     } catch (error) {
@@ -45,6 +58,63 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerificationCodeChange = (e) => {
+    setVerificationCode(e.target.value);
+  };
+
+  const handleVerificationConfirm = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      alert('请输入6位数字验证码');
+      return;
+    }
+
+    setVerificationLoading(true);
+    try {
+      // 提交验证码并继续流程
+      const response = await fetch('/api/convert-to-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username,
+          password,
+          websiteUrl,
+          selector,
+          sessionId: currentSessionId,
+          verificationCode,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert('验证码提交失败: ' + (error.message || response.statusText));
+        return;
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        setPdfOutput(result.pdfUrl);
+        setNeedsVerification(false);
+        setVerificationCode('');
+        setCurrentSessionId(null);
+        alert('PDF生成成功! 您可以通过下方链接下载。');
+      } else {
+        alert('验证码验证失败: ' + result.message);
+      }
+    } catch (error) {
+      alert('验证码提交失败: ' + error.message);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleVerificationCancel = () => {
+    setNeedsVerification(false);
+    setVerificationCode('');
   };
 
   const handlePdfOutputChange = (e) => {
@@ -206,6 +276,40 @@ export default function Home() {
         DOWNLOAD PDF
         <AiOutlineDownload className="h-6 w-6 ml-2" />
       </button>
+
+      {/* 验证码输入界面 */}
+      {needsVerification && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-4 text-gray-800">
+              请输入手机验证码
+            </h3>
+            <input
+              type="text"
+              value={verificationCode}
+              onChange={handleVerificationCodeChange}
+              placeholder="请输入6位验证码"
+              maxLength={6}
+              className="border border-gray-300 rounded-lg p-3 mb-4 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-center text-lg"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={handleVerificationConfirm}
+                disabled={verificationLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-3 px-6 disabled:opacity-50 transition-colors"
+              >
+                {verificationLoading ? '提交中...' : '确认'}
+              </button>
+              <button
+                onClick={handleVerificationCancel}
+                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white rounded-lg py-3 px-6 transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

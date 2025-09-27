@@ -14,6 +14,50 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const AdmZip = require('adm-zip');
 
+// 会话存储 - 使用内存存储方案
+const sessionStore = new Map();
+
+// 会话类
+// eslint-disable-next-line no-unused-vars
+class PdfSession {
+  constructor(sessionId, browser, page, loginState = 'started') {
+    this.sessionId = sessionId;
+    this.browser = browser;
+    this.page = page;
+    this.loginState = loginState;
+    this.timestamp = Date.now();
+    this.verificationCode = null;
+    this.username = null;
+    this.password = null;
+    this.websiteUrl = null;
+    this.selector = null;
+  }
+
+  // 更新会话时间戳
+  updateTimestamp() {
+    this.timestamp = Date.now();
+  }
+
+  // 检查会话是否过期（10分钟）
+  isExpired() {
+    return Date.now() - this.timestamp > 10 * 60 * 1000;
+  }
+}
+
+// 会话清理定时器（每5分钟清理一次过期会话）
+setInterval(() => {
+  for (const [sessionId, session] of sessionStore.entries()) {
+    if (session.isExpired()) {
+      console.log(`清理过期会话: ${sessionId}`);
+      // 关闭浏览器实例
+      if (session.browser) {
+        session.browser.close().catch(console.error);
+      }
+      sessionStore.delete(sessionId);
+    }
+  }
+}, 5 * 60 * 1000);
+
 /**
  * Create a Chrome extension for proxy authentication
  * @param {string} proxyHost - Proxy host
@@ -67,32 +111,32 @@ function createProxyAuthExtension(
   };
 
   const backgroundJs = `
-var config = {
-    mode: "fixed_servers",
-    rules: {
-        singleProxy: {
-            scheme: "${scheme}",
-            host: "${proxyHost}",
-            port: parseInt(${proxyPort})
-        },
-        bypassList: ["localhost"]
-    }
-};
-chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-function callbackFn(details) {
-    return {
-        authCredentials: {
-            username: "${proxyUsername}",
-            password: "${proxyPassword}"
+    var config = {
+        mode: "fixed_servers",
+        rules: {
+            singleProxy: {
+                scheme: "${scheme}",
+                host: "${proxyHost}",
+                port: parseInt(${proxyPort})
+            },
+            bypassList: ["localhost"]
         }
     };
-}
-chrome.webRequest.onAuthRequired.addListener(
-    callbackFn,
-    {urls: ["<all_urls>"]},
-    ['blocking']
-);
-`;
+    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+    function callbackFn(details) {
+        return {
+            authCredentials: {
+                username: "${proxyUsername}",
+                password: "${proxyPassword}"
+            }
+        };
+    }
+    chrome.webRequest.onAuthRequired.addListener(
+        callbackFn,
+        {urls: ["<all_urls>"]},
+        ['blocking']
+    );
+  `;
 
   // Create temporary directory for extension files
   const tempDir = path.join(
@@ -434,204 +478,26 @@ async function clickButton(page, selector, timeout = 2000) {
 /**
  * 处理手机验证码验证
  * @param {Object} page - Puppeteer页面对象
- * @returns {Promise<boolean>} 验证是否成功
+ * @returns {Promise<Object>} 验证结果 {needsVerification: boolean, success: boolean, verificationCode: string}
  */
 async function handlePhoneVerification(page) {
-  // 等待手机验证码输入框出现
-  await page.waitForSelector('.phoneVerify___NiGOL', {
-    timeout: 50000,
-  });
-  console.log('✅ 检测到手机验证码输入框');
-
-  // 等待用户输入验证码
-  const verificationCode = await waitForPhoneCodeInput(page);
-
-  if (verificationCode) {
-    console.log(`✅ 获取到验证码: ${verificationCode}`);
-    // 输入验证码
-    await humanType(page, '#phoneVerifyCode', verificationCode, {
-      clear: true,
+  try {
+    // 等待手机验证码输入框出现
+    await page.waitForSelector('.phoneVerify___NiGOL', {
+      timeout: 5000,
     });
-    await delay(randomDelay(500, 1000));
+    console.log('✅ 检测到手机验证码输入框');
 
-    // 检查是否有确认按钮
-    const sendButtonSelector = '.btns___JomC2';
-    const hasSendButton = await page.$(sendButtonSelector);
-
-    if (hasSendButton) {
-      console.log('检测到确认按钮，点击确认...');
-      await clickButton(page, '.btns___JomC2 > button:nth-child(1)', 2000);
-      await delay(randomDelay(1000, 2000));
-      return true;
-    } else {
-      console.log('❌ 未检测到确认按钮，跳过点击');
-      return false;
-    }
-  } else {
-    console.log('❌ 未获取到验证码，跳过输入');
-    return false;
+    // 返回需要验证码的状态
+    return {
+      needsVerification: true,
+    };
+  } catch (error) {
+    console.log('未检测到手机验证码输入框，继续正常流程');
+    return {
+      needsVerification: false,
+    };
   }
-}
-
-/**
- * 等待用户输入手机验证码（可扩展为多种输入方式）
- * @param {Object} page - Puppeteer页面对象
- * @returns {Promise<string|null>} 验证码或null
- */
-async function waitForPhoneCodeInput(page) {
-  return page.evaluate(() => {
-    return new Promise((resolve) => {
-      // 创建模态框容器
-      const modal = document.createElement('div');
-      modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 10000;
-        font-family: Arial, sans-serif;
-      `;
-
-      // 创建模态框内容
-      const modalContent = document.createElement('div');
-      modalContent.style.cssText = `
-        background: white;
-        padding: 30px;
-        border-radius: 10px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        min-width: 300px;
-        text-align: center;
-      `;
-
-      // 创建标题
-      const title = document.createElement('h3');
-      title.textContent = '请输入手机验证码';
-      title.style.cssText = `
-        margin: 0 0 20px 0;
-        color: #333;
-        font-size: 18px;
-      `;
-
-      // 创建输入框
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = '请输入6位验证码';
-      input.maxLength = 6;
-      input.style.cssText = `
-        width: 200px;
-        padding: 12px;
-        border: 2px solid #ddd;
-        border-radius: 5px;
-        font-size: 16px;
-        text-align: center;
-        margin-bottom: 20px;
-        outline: none;
-        transition: border-color 0.3s;
-      `;
-
-      input.addEventListener('focus', () => {
-        input.style.borderColor = '#007bff';
-      });
-
-      input.addEventListener('blur', () => {
-        input.style.borderColor = '#ddd';
-      });
-
-      // 创建按钮容器
-      const buttonContainer = document.createElement('div');
-      buttonContainer.style.cssText = `
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-      `;
-
-      // 创建确认按钮
-      const confirmBtn = document.createElement('button');
-      confirmBtn.textContent = '确认';
-      confirmBtn.style.cssText = `
-        padding: 10px 20px;
-        background-color: #007bff;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 14px;
-        transition: background-color 0.3s;
-      `;
-
-      confirmBtn.addEventListener('mouseenter', () => {
-        confirmBtn.style.backgroundColor = '#0056b3';
-      });
-
-      confirmBtn.addEventListener('mouseleave', () => {
-        confirmBtn.style.backgroundColor = '#007bff';
-      });
-
-      // 创建取消按钮
-      const cancelBtn = document.createElement('button');
-      cancelBtn.textContent = '取消';
-      cancelBtn.style.cssText = `
-        padding: 10px 20px;
-        background-color: #6c757d;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 14px;
-        transition: background-color 0.3s;
-      `;
-
-      cancelBtn.addEventListener('mouseenter', () => {
-        cancelBtn.style.backgroundColor = '#545b62';
-      });
-
-      cancelBtn.addEventListener('mouseleave', () => {
-        cancelBtn.style.backgroundColor = '#6c757d';
-      });
-
-      // 组装模态框
-      modalContent.appendChild(title);
-      modalContent.appendChild(input);
-      buttonContainer.appendChild(confirmBtn);
-      buttonContainer.appendChild(cancelBtn);
-      modalContent.appendChild(buttonContainer);
-      modal.appendChild(modalContent);
-
-      // 添加到页面
-      document.body.appendChild(modal);
-
-      // 自动聚焦输入框
-      input.focus();
-      // 确认按钮点击事件
-      const handleConfirm = () => {
-        const code = input.value.trim();
-
-        if (code.length === 6 && /^\d+$/.test(code)) {
-          document.body.removeChild(modal);
-          resolve(code);
-        } else {
-          alert('请输入6位数字验证码');
-          input.focus();
-          input.select();
-        }
-      };
-
-      // 取消按钮点击事件
-      const handleCancel = () => {
-        document.body.removeChild(modal);
-        resolve(null);
-      };
-
-      // 绑定事件
-      confirmBtn.addEventListener('click', handleConfirm);
-      cancelBtn.addEventListener('click', handleCancel);
-    });
-  });
 }
 
 async function tryLogin(page, timestamp, username, password) {
@@ -714,10 +580,13 @@ async function tryLogin(page, timestamp, username, password) {
     );
 
     // 处理手机验证码
-    const checkCode = await handlePhoneVerification(page);
+    const verificationResult = await handlePhoneVerification(page);
+    // test code
+    // const verificationResult = { needsVerification: true };
 
-    if (!checkCode) {
-      return false;
+    if (verificationResult.needsVerification) {
+      // 如果需要验证码，抛出特定错误让前端处理
+      throw new Error('NEEDS_VERIFICATION_CODE');
     }
 
     try {
@@ -746,7 +615,7 @@ async function tryLogin(page, timestamp, username, password) {
     }
   } catch (error) {
     console.error('登录失败:', error);
-    throw new Error('登录失败');
+    throw new Error(error.message);
   }
 }
 
@@ -1167,10 +1036,172 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { username, password, websiteUrl, selector } = req.body;
+  const {
+    username,
+    password,
+    websiteUrl,
+    selector,
+    sessionId,
+    verificationCode,
+  } = req.body;
 
   console.log('Received request:', req.body);
 
+  // 如果是继续流程且有会话ID
+  if (sessionId && sessionStore.has(sessionId)) {
+    const session = sessionStore.get(sessionId);
+
+    // 检查会话是否过期
+    if (session.isExpired()) {
+      sessionStore.delete(sessionId);
+      return res.status(408).json({
+        success: false,
+        message: '会话已过期，请重新开始',
+      });
+    }
+
+    // 更新会话时间戳
+    session.updateTimestamp();
+
+    // 处理验证码提交
+    if (verificationCode) {
+      try {
+        console.log(
+          `继续流程，会话ID: ${sessionId}, 验证码: ${verificationCode}`
+        );
+
+        // 输入验证码
+        await humanType(session.page, '#phoneVerifyCode', verificationCode, {
+          clear: true,
+        });
+        await delay(randomDelay(500, 1000));
+
+        // 点击确认按钮
+        await clickButton(
+          session.page,
+          '.btns___JomC2 > button:nth-child(1)',
+          2000
+        );
+        await delay(randomDelay(1000, 2000));
+
+        // 检查登录状态
+        const isLoggedIn = await session.page.evaluate(() => {
+          const hasToken =
+            localStorage.getItem('TOKEN') || sessionStorage.getItem('TOKEN');
+          const hasUserBlock = document.querySelector('.user_block___2sFge');
+          return !!hasToken || !!hasUserBlock;
+        });
+
+        if (isLoggedIn) {
+          console.log('验证码验证成功，继续PDF生成流程');
+
+          // 继续后续操作（简历页面导航等）
+          // 点击简历箭头
+          await clickButton(
+            session.page,
+            '.user_block___2sFge > .block_3___1ClCH > .icon___2siAf > i',
+            10000
+          );
+
+          // 点击简历详情
+          await clickButton(
+            session.page,
+            '.item___3m969 > .item-right___2wu38 > button:nth-child(1)',
+            10000
+          );
+
+          // 等待页面加载完成
+          await session.page.waitForSelector(
+            '.live-photo___2oydI > .avatar___3v9kT',
+            {
+              timeout: 10000,
+            }
+          );
+
+          // 生成PDF（继续使用原有逻辑）
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const pdfDir = path.join(process.cwd(), 'temp');
+          if (!fs.existsSync(pdfDir)) {
+            fs.mkdirSync(pdfDir, { recursive: true });
+          }
+
+          const pdfFileName = `${timestamp}.pdf`;
+          const pdfPath = path.join(pdfDir, pdfFileName);
+
+          // 获取目标元素
+          await session.page.waitForSelector(selector, { timeout: 3000 });
+          const element = await session.page.$(selector);
+          if (!element) {
+            return res.status(404).json({
+              success: false,
+              message: `未找到元素: ${selector}`,
+            });
+          }
+
+          const box = await element.boundingBox();
+          if (!box) {
+            throw new Error('元素不可见或尺寸为0');
+          }
+
+          // 生成PDF并保存
+          const tempDir = path.join(process.cwd(), 'temp', 'images');
+          const tempImagePath = path.join(tempDir, `${timestamp}-temp.png`);
+
+          try {
+            if (!fs.existsSync(tempDir)) {
+              fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            await element.screenshot({ path: tempImagePath, type: 'png' });
+            const imageBytes = fs.readFileSync(tempImagePath);
+            const pdfDoc = await PDFDocument.create();
+            const margin = 20;
+            const pageWidth = box.width + margin * 2;
+            const pageHeight = box.height;
+
+            const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+            const embeddedImage = await pdfDoc.embedPng(imageBytes);
+            pdfPage.drawImage(embeddedImage, {
+              x: margin,
+              y: 0,
+              width: box.width,
+              height: box.height,
+            });
+            const pdfBytes = await pdfDoc.save();
+            fs.writeFileSync(pdfPath, pdfBytes);
+            fs.unlinkSync(tempImagePath);
+
+            // 清理会话
+            sessionStore.delete(sessionId);
+
+            res.status(200).json({
+              success: true,
+              pdfUrl: `/api/download?file=${pdfFileName}`,
+              message: 'PDF生成成功，请通过链接下载',
+            });
+          } catch (error) {
+            if (fs.existsSync(tempImagePath)) {
+              fs.unlinkSync(tempImagePath);
+            }
+            throw error;
+          }
+        } else {
+          throw new Error('验证码验证失败');
+        }
+      } catch (error) {
+        console.error('继续流程失败:', error);
+        // 清理会话
+        sessionStore.delete(sessionId);
+        res.status(500).json({
+          success: false,
+          message: '验证码验证失败，请重新开始',
+        });
+      }
+      return;
+    }
+  }
+
+  // 新流程开始
   if (!websiteUrl || !selector) {
     return res
       .status(400)
@@ -1178,87 +1209,83 @@ export default async function handler(req, res) {
   }
 
   let browser;
-  try {
-    await fetchAndValidateProxies();
 
-    // return true;
-
-    // 随机选择设备指纹
-    const deviceFingerprint =
-      deviceFingerprints[Math.floor(Math.random() * deviceFingerprints.length)];
-    const environmentFingerprint =
-      environmentFingerprints[
-        Math.floor(Math.random() * environmentFingerprints.length)
-      ];
-
-    // 构建启动参数
-    const launchArgs = [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-blink-features=AutomationControlled',
-      `--window-size=${deviceFingerprint.viewport.width},${deviceFingerprint.viewport.height}`,
-      '--enable-webgl',
-      '--enable-accelerated-2d-canvas',
-      '--enable-gpu-rasterization',
-      '--enable-zero-copy',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      // 添加IP相关配置
-      '--disable-features=VizDisplayCompositor',
-      '--disable-back-forward-cache',
-      '--disable-component-extensions-with-background-pages',
-      '--disable-default-apps',
-      '--disable-extensions',
-      '--disable-translate',
-      '--disable-sync',
-      '--metrics-recording-only',
-      '--safebrowsing-disable-auto-update',
-      '--disable-client-side-phishing-detection',
-      '--disable-popup-blocking',
-      '--disable-prompt-on-repost',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-hang-monitor',
-      '--disable-ipc-flooding-protection',
-      '--disable-prompt-on-repost',
-      '--disable-domain-reliability',
-      '--disable-features=AudioServiceOutOfProcess',
-      '--disable-site-isolation-trials',
-      '--disable-web-resources',
-      '--disable-back-forward-cache',
-      '--disable-component-extensions-with-background-pages',
+  // 随机选择设备指纹
+  const deviceFingerprint =
+    deviceFingerprints[Math.floor(Math.random() * deviceFingerprints.length)];
+  const environmentFingerprint =
+    environmentFingerprints[
+      Math.floor(Math.random() * environmentFingerprints.length)
     ];
 
-    // 处理代理配置 - 使用插件方式
-    const randomProxy = getRandomProxy();
-    if (randomProxy) {
-      console.log(`使用代理插件方式: ${randomProxy.server}`);
-      browser = await launchBrowserWithProxy(
-        randomProxy,
-        deviceFingerprint,
-        launchArgs
-      );
-    } else {
-      // 无代理时使用原有方式
-      console.log('无代理可用，使用标准启动方式');
-      browser = await puppeteer.launch({
-        headless: true,
-        // headless: false,
-        args: launchArgs,
-        slowMo: Math.floor(Math.random() * 50) + 50, // 随机延迟50-100ms
-      });
-    }
+  // 构建启动参数
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-web-security',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--disable-blink-features=AutomationControlled',
+    `--window-size=${deviceFingerprint.viewport.width},${deviceFingerprint.viewport.height}`,
+    '--enable-webgl',
+    '--enable-accelerated-2d-canvas',
+    '--enable-gpu-rasterization',
+    '--enable-zero-copy',
+    '--disable-dev-shm-usage',
+    '--disable-accelerated-2d-canvas',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    // 添加IP相关配置
+    '--disable-features=VizDisplayCompositor',
+    '--disable-back-forward-cache',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps',
+    '--disable-extensions',
+    '--disable-translate',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--safebrowsing-disable-auto-update',
+    '--disable-client-side-phishing-detection',
+    '--disable-popup-blocking',
+    '--disable-prompt-on-repost',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-hang-monitor',
+    '--disable-ipc-flooding-protection',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--disable-features=AudioServiceOutOfProcess',
+    '--disable-site-isolation-trials',
+    '--disable-web-resources',
+    '--disable-back-forward-cache',
+    '--disable-component-extensions-with-background-pages',
+  ];
 
-    const page = await browser.newPage();
-
+  // 处理代理配置 - 使用插件方式
+  await fetchAndValidateProxies();
+  const randomProxy = getRandomProxy();
+  if (randomProxy) {
+    console.log(`使用代理插件方式: ${randomProxy.server}`);
+    browser = await launchBrowserWithProxy(
+      randomProxy,
+      deviceFingerprint,
+      launchArgs
+    );
+  } else {
+    // 无代理时使用原有方式
+    console.log('无代理可用，使用标准启动方式');
+    browser = await puppeteer.launch({
+      headless: true,
+      // headless: false,
+      args: launchArgs,
+      slowMo: Math.floor(Math.random() * 50) + 50, // 随机延迟50-100ms
+    });
+  }
+  const page = await browser.newPage();
+  try {
     // 设置完整的设备指纹
     await page.setUserAgent(deviceFingerprint.userAgent);
     await page.setViewport({
@@ -1392,7 +1419,12 @@ export default async function handler(req, res) {
       // icbc
 
       // 打开首页
-      await page.goto(websiteUrl);
+      await page.goto(websiteUrl, {
+        waitUntil: 'networkidle0',
+      });
+
+      await page.waitForSelector('body', { timeout: 10000 });
+      console.log('页面加载完成');
 
       // 点击登录按钮
       await clickButton(
@@ -1529,7 +1561,35 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('PDF generation error:', error);
-    if (error.message.includes('Timeout')) {
+
+    // 检查是否需要验证码
+    if (error.message === 'NEEDS_VERIFICATION_CODE') {
+      // 创建会话并保存浏览器状态
+      const sessionId = `pdf_${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 9)}`;
+      const session = new PdfSession(
+        sessionId,
+        browser,
+        page,
+        'needs_verification'
+      );
+      session.username = username;
+      session.password = password;
+      session.websiteUrl = websiteUrl;
+      session.selector = selector;
+      sessionStore.set(sessionId, session);
+
+      // 不关闭浏览器，保持会话状态
+      browser = null; // 防止finally中关闭浏览器
+
+      res.status(200).json({
+        success: false,
+        needsVerification: true,
+        sessionId: sessionId,
+        message: '需要输入手机验证码',
+      });
+    } else if (error.message.includes('Timeout')) {
       res
         .status(408)
         .json({ success: false, message: 'Timeout waiting for element' });
@@ -1729,9 +1789,4 @@ const recognizeQwen3Vl = async (captchaDir, imagePath) => {
   }
 };
 
-export {
-  recognize,
-  recognizeQwen3Vl,
-  createProxyAuthExtension,
-  launchBrowserWithProxy,
-};
+export { recognize, recognizeQwen3Vl };
