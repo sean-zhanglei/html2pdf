@@ -332,7 +332,7 @@ const randomDelay = (min = 500, max = 2000) => {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // 模拟人类点击行为
-async function humanClick(page, selector, timeout = 5000) {
+async function humanClick(page, selector, timeout = 10000) {
   try {
     await page.waitForSelector(selector, { timeout });
 
@@ -370,7 +370,7 @@ async function humanType(page, selector, text, options = {}) {
   const { clear = true } = options;
 
   try {
-    await page.waitForSelector(selector, { timeout: 5000 });
+    await page.waitForSelector(selector, { timeout: 10000 });
 
     if (clear) {
       await page.click(selector, { clickCount: 3 }); // 全选
@@ -895,6 +895,8 @@ async function validateProxy(proxy) {
 // 获取并验证代理，循环10次直到成功
 async function fetchAndValidateProxies() {
   console.log('开始获取和验证代理...');
+  // 清空现有代理列表
+  proxyConfigs.length = 0;
   const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     console.log(`尝试第 ${attempt} 次获取代理...`);
@@ -1186,7 +1188,7 @@ export default async function handler(req, res) {
       await clickButton(
         page,
         '.login > .logout___1GdAy > .btns___34OuS > button:nth-child(1)',
-        5000
+        10000
       );
 
       // 替换原有的登录代码
