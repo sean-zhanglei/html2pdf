@@ -530,7 +530,8 @@ async function tryLogin(page, timestamp, username, password) {
 
     // 清空输入框并等待
     await clearInputs();
-
+    // 等待显示登录框
+    await delay(randomDelay(3000, 5000));
     // 输入用户名密码（使用人类输入行为）
     await humanType(page, '#account', username, { clear: true });
     await delay(randomDelay(500, 1000));
