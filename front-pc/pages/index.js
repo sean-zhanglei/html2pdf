@@ -132,7 +132,7 @@ export default function Home() {
   const handleLoginRequiredChange = (e) => {
     if (e) {
       setWebsiteUrl('https://job.icbc.com.cn/pc/index.html#/main/home');
-      setSelector('.right___1-Ni0 > .content__right___1mc2_');
+      setSelector('.right___edJP2 > .content__right___oRyKH');
     } else {
       setWebsiteUrl('');
       setSelector('');
