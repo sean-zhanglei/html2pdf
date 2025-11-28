@@ -23,7 +23,6 @@ const SELECTORS = {
     '.item___TD7Ak > .item-right___-4pij > button:nth-child(1)',
   LIVE_PHOTO_AVATAR: '.live-photo___Ezp37 > .avatar___T67v7',
   ITEM_EDIT_ACTION: '.title__edit___QAL2m',
-  HOME_LOGIN_BUTTON: '.login > .logout___A45sf > .btns___FUP9u > button:nth-child(1)',
 };
 
 /**
