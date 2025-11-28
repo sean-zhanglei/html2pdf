@@ -5,7 +5,7 @@ import { SessionManager } from '../../services/session/SessionManager.js';
 import { LoginHandler } from '../../services/login/LoginHandler.js';
 import { getMatchedFingerprints } from '../../services/browser/DeviceFingerprints.js';
 // 页面元素选择器常量配置
-const SELECTORS = {
+const SELECTORS_LOGIN = {
   HOME_LOGIN_BUTTON:
     '.login > .logout___A45sf > .btns___FUP9u > button:nth-child(1)',
 };
@@ -141,7 +141,7 @@ export default async function handler(req, res) {
       // 点击登录按钮
       await humanBehaviorSimulator.clickButton(
         page,
-        SELECTORS.HOME_LOGIN_BUTTON,
+        SELECTORS_LOGIN.HOME_LOGIN_BUTTON,
         10000
       );
 
