@@ -520,14 +520,14 @@ export class LoginHandler {
       });
 
       // 删除class=title__edit___QAL2m的元素
-      await page.evaluate(() => {
+      await page.evaluate((SELECTORS) => {
         const editTitleElement = document.querySelector(
           SELECTORS.ITEM_EDIT_ACTION
         );
         if (editTitleElement) {
           editTitleElement.remove();
         }
-      });
+      }, SELECTORS);
 
       console.log('登录后操作完成');
     } catch (error) {
