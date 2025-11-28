@@ -519,14 +519,14 @@ export class LoginHandler {
         timeout: 10000,
       });
 
-      // 删除class=title__edit___QAL2m的元素
+      // 删除所有class=title__edit___QAL2m的元素
       await page.evaluate((SELECTORS) => {
-        const editTitleElement = document.querySelector(
+        const editTitleElements = document.querySelectorAll(
           SELECTORS.ITEM_EDIT_ACTION
         );
-        if (editTitleElement) {
-          editTitleElement.remove();
-        }
+        editTitleElements.forEach((element) => {
+          element.remove();
+        });
       }, SELECTORS);
 
       console.log('登录后操作完成');
